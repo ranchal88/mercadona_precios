@@ -3,8 +3,15 @@ import requests
 import pandas as pd
 from datetime import datetime
 
-# Definir las CCAA y sus warehouses
-warehouses = {
+# ==============================
+# CONFIG
+# ==============================
+
+BASE_URL = "https://tienda.mercadona.es/api/categories/112/"
+DATA_FOLDER = "data"
+LANG = "es"
+
+WAREHOUSES = {
     "andalucia": ["4694", "3968", "4544", "4354", "svq1"],
     "aragon": ["4665", "4389", "4493"],
     "asturias": ["4480"],
@@ -24,39 +31,94 @@ warehouses = {
     "pais_vasco": ["4391", "4331", "4697"]
 }
 
-# Directorio de datos
-data_folder = "data"
+# ==============================
+# SCRAPING
+# ==============================
 
-# Función para realizar el scraping
-def scrape_warehouse(ccaa, warehouse_id):
-    url = f"https://tienda.mercadona.es/api/categories/112/?lang=es&wh={warehouse_id}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"Error al obtener datos para {ccaa} desde warehouse {warehouse_id}")
+def scrape_category(warehouse_id: str) -> dict | None:
+    url = f"{BASE_URL}?lang={LANG}&wh={warehouse_id}"
+    try:
+        r = requests.get(url, timeout=30)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"❌ Error warehouse {warehouse_id}: {e}")
         return None
 
-# Función para guardar los datos en un CSV
-def save_data(ccaa, data):
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    file_path = os.path.join(data_folder, ccaa, f"mercadona_{ccaa}_{date_str}.csv")
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    df = pd.DataFrame(data)
-    df.to_csv(file_path, index=False, sep=";", encoding="utf-8-sig")
-    print(f"Datos guardados en {file_path}")
+# ==============================
+# NORMALIZATION
+# ==============================
 
-# Scrapeo para cada CCAA
-def scrape_all():
-    for ccaa, warehouse_ids in warehouses.items():
-        all_data = []
-        for warehouse_id in warehouse_ids:
-            print(f"🏴‍☠️ Scrapeando {ccaa} desde warehouse {warehouse_id}...")
-            data = scrape_warehouse(ccaa, warehouse_id)
-            if data:
-                all_data.append(data)
-        if all_data:
-            save_data(ccaa, all_data)
+def extract_products(ccaa: str, warehouse: str, raw: dict, date: str) -> list[dict]:
+    rows = []
+
+    for cat in raw.get("categories", []):
+        category_id = cat.get("id")
+        category_name = cat.get("name")
+
+        for product in cat.get("products", []):
+            price_info = product.get("price_instructions", {})
+
+            rows.append({
+                "date": date,
+                "ccaa": ccaa,
+                "warehouse": warehouse,
+                "category_id": category_id,
+                "category_name": category_name,
+                "product_id": product.get("id"),
+                "product_name": product.get("name"),
+                "price": price_info.get("unit_price"),
+                "price_per_unit": price_info.get("bulk_price"),
+                "unit_size": price_info.get("unit_size"),
+                "unit_name": price_info.get("unit_name"),
+                "is_pack": price_info.get("is_pack"),
+                "pack_size": price_info.get("pack_size"),
+                "iva": price_info.get("iva")
+            })
+
+    return rows
+
+# ==============================
+# SAVE CSV
+# ==============================
+
+def save_csv(ccaa: str, rows: list[dict], date: str):
+    if not rows:
+        return
+
+    path = os.path.join(DATA_FOLDER, ccaa)
+    os.makedirs(path, exist_ok=True)
+
+    file = os.path.join(path, f"mercadona_{ccaa}_{date}.csv")
+    df = pd.DataFrame(rows)
+
+    df.to_csv(
+        file,
+        index=False,
+        sep=";",
+        encoding="utf-8-sig"
+    )
+
+    print(f"✅ {ccaa}: {len(df)} productos guardados")
+
+# ==============================
+# MAIN
+# ==============================
+
+def main():
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+
+    for ccaa, warehouses in WAREHOUSES.items():
+        print(f"\n🏴‍☠️ CCAA: {ccaa}")
+        all_rows = []
+
+        for wh in warehouses:
+            print(f"  ↳ Warehouse {wh}")
+            raw = scrape_category(wh)
+            if raw:
+                all_rows.extend(extract_products(ccaa, wh, raw, today))
+
+        save_csv(ccaa, all_rows, today)
 
 if __name__ == "__main__":
-    scrape_all()
+    main()
