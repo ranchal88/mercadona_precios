@@ -32,7 +32,14 @@ jobs:
         run: |
           DATE=$(date -u +%F)
           echo "DATE=$DATE" >> $GITHUB_ENV
-          zip -r "mercadona_ccaa_${DATE}.zip" data
+      
+          if [ -d "data" ]; then
+            zip -r "mercadona_ccaa_${DATE}.zip" data
+          else
+            echo "❌ data/ directory not found. Scraper probably failed."
+            exit 1
+          fi
+
 
       - name: Create GitHub Release + upload zip
         uses: softprops/action-gh-release@v2
