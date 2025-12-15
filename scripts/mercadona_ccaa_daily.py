@@ -156,6 +156,7 @@ def save_csv(ccaa: str, rows: List[Dict], date: str):
 
 def main():
     today = datetime.utcnow().strftime("%Y-%m-%d")
+    total_products = 0
 
     for ccaa, warehouses in WAREHOUSES.items():
         print(f"\n🏴‍☠️ CCAA: {ccaa}")
@@ -174,10 +175,17 @@ def main():
                         extract_products(ccaa, wh, raw, today)
                     )
 
-        save_csv(ccaa, all_rows, today)
-    if not all_rows:
-    print("❌ No se han generado datos en ninguna CCAA")
-    exit(1)
+        if all_rows:
+            save_csv(ccaa, all_rows, today)
+            total_products += len(all_rows)
+        else:
+            print(f"⚠️ {ccaa}: no se generaron productos")
+
+    if total_products == 0:
+        print("❌ No se han generado datos en ninguna CCAA")
+        exit(1)
+
+    print(f"\n✅ Total productos generados: {total_products}")
 
 
 if __name__ == "__main__":
