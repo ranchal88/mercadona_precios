@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import pandas as pd
 from datetime import datetime
@@ -12,7 +13,19 @@ BASE_URL = "https://tienda.mercadona.es/api/categories"
 LANG = "es"
 DATA_FOLDER = "data"
 REQUEST_TIMEOUT = 30
+SLEEP_BETWEEN_REQUESTS = 0.05  # 20 req/seg aprox
 
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+    "Accept-Language": "es-ES,es;q=0.9",
+    "Referer": "https://tienda.mercadona.es/"
+}
+
+# Warehouses por CCAA
 WAREHOUSES = {
     "andalucia": ["4694", "3968", "4544", "4354", "svq1"],
     "aragon": ["4665", "4389", "4493"],
@@ -33,49 +46,39 @@ WAREHOUSES = {
     "pais_vasco": ["4391", "4331", "4697"]
 }
 
+# Categorías válidas (curadas, estables)
+CATEGORY_IDS = [
+    27, 28, 29, 31, 32, 34, 36, 37, 38, 40, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+    51, 52, 53, 54, 56, 58, 59, 60, 62, 64, 65, 66, 68, 69, 71, 72, 75, 77, 78,
+    79, 80, 81, 83, 84, 86, 88, 89, 90, 92, 95, 97, 98, 99, 100, 103, 104, 105,
+    106, 107, 108, 109, 110, 111, 112, 115, 116, 117, 118, 120, 121, 122, 123,
+    126, 127, 129, 130, 132, 133, 135, 138, 140, 142, 143, 145, 147, 148, 149,
+    150, 151, 152, 154, 155, 156, 158, 159, 161, 162, 163, 164, 166, 168, 169,
+    170, 171, 173, 174, 181, 185, 186, 187, 188, 189, 190, 191, 192, 194, 196,
+    198, 199, 201, 202, 203, 206, 207, 208, 210, 212, 213, 214, 216, 217, 218,
+    219, 221, 222, 225, 226, 229, 230, 231, 232, 233, 234, 235, 237, 238, 239,
+    241, 243, 244
+]
+
 # ==============================
-# HTTP HELPERS
+# HTTP
 # ==============================
 
 def get_json(url: str) -> Dict | None:
     try:
-        r = requests.get(url, timeout=REQUEST_TIMEOUT)
+        r = requests.get(
+            url,
+            headers=HEADERS,
+            timeout=REQUEST_TIMEOUT
+        )
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        print(f"❌ Error GET {url}: {e}")
+        print(f"⚠️ Error GET {url}: {e}")
         return None
 
 # ==============================
-# CATEGORY TREE
-# ==============================
-
-def get_all_category_ids(warehouse: str) -> List[int]:
-    """
-    Descarga el árbol completo de categorías y devuelve
-    TODOS los IDs (padres + hojas)
-    """
-    url = f"{BASE_URL}/?lang={LANG}&wh={warehouse}"
-    data = get_json(url)
-
-    if not data:
-        return []
-
-    ids = set()
-
-    def walk(categories):
-        for c in categories:
-            cid = c.get("id")
-            if cid:
-                ids.add(cid)
-            if c.get("categories"):
-                walk(c["categories"])
-
-    walk(data.get("categories", []))
-    return list(ids)
-
-# ==============================
-# CATEGORY SCRAPE
+# SCRAPING
 # ==============================
 
 def scrape_category(category_id: int, warehouse: str) -> Dict | None:
@@ -83,7 +86,7 @@ def scrape_category(category_id: int, warehouse: str) -> Dict | None:
     return get_json(url)
 
 # ==============================
-# PRODUCT NORMALIZATION
+# NORMALIZATION
 # ==============================
 
 def extract_products(
@@ -95,27 +98,32 @@ def extract_products(
 
     rows = []
 
-    for cat in raw.get("categories", []):
-        category_id = cat.get("id")
-        category_name = cat.get("name")
+    for subcat in raw.get("categories", []):
+        subcat_id = subcat.get("id")
+        subcat_name = subcat.get("name")
 
-        for product in cat.get("products", []):
-            price = product.get("price_instructions", {})
+        for p in subcat.get("products", []):
+            price = p.get("price_instructions", {})
 
             rows.append({
                 "date": date,
                 "ccaa": ccaa,
                 "warehouse": warehouse,
-                "category_id": category_id,
-                "category_name": category_name,
-                "product_id": product.get("id"),
-                "product_name": product.get("name"),
+                "category_id": raw.get("id"),
+                "subcategory_id": subcat_id,
+                "subcategory_name": subcat_name,
+                "product_id": p.get("id"),
+                "product_name": p.get("display_name"),
+                "slug": p.get("slug"),
+                "packaging": p.get("packaging"),
+                "published": p.get("published"),
                 "price": price.get("unit_price"),
                 "price_per_unit": price.get("bulk_price"),
                 "unit_size": price.get("unit_size"),
-                "unit_name": price.get("unit_name"),
-                "is_pack": price.get("is_pack"),
-                "pack_size": price.get("pack_size"),
+                "size_format": price.get("size_format"),
+                "selling_method": price.get("selling_method"),
+                "is_new": price.get("is_new"),
+                "price_decreased": price.get("price_decreased"),
                 "iva": price.get("iva")
             })
 
@@ -125,10 +133,10 @@ def extract_products(
 # SAVE CSV
 # ==============================
 
-def save_csv(ccaa: str, rows: List[Dict], date: str):
+def save_csv(ccaa: str, rows: List[Dict], date: str) -> int:
     if not rows:
         print(f"⚠️ {ccaa}: sin datos")
-        return
+        return 0
 
     path = os.path.join(DATA_FOLDER, ccaa)
     os.makedirs(path, exist_ok=True)
@@ -136,7 +144,6 @@ def save_csv(ccaa: str, rows: List[Dict], date: str):
     file_path = os.path.join(path, f"mercadona_{ccaa}_{date}.csv")
     df = pd.DataFrame(rows)
 
-    # Deduplicación defensiva
     df = df.drop_duplicates(
         subset=["date", "ccaa", "warehouse", "product_id"]
     )
@@ -149,6 +156,7 @@ def save_csv(ccaa: str, rows: List[Dict], date: str):
     )
 
     print(f"✅ {ccaa}: {len(df)} productos guardados")
+    return len(df)
 
 # ==============================
 # MAIN
@@ -164,29 +172,21 @@ def main():
 
         for wh in warehouses:
             print(f"  ↳ Warehouse {wh}")
-
-            category_ids = get_all_category_ids(wh)
-            print(f"    • {len(category_ids)} categorías")
-
-            for cat_id in category_ids:
+            for cat_id in CATEGORY_IDS:
                 raw = scrape_category(cat_id, wh)
                 if raw:
                     all_rows.extend(
                         extract_products(ccaa, wh, raw, today)
                     )
+                time.sleep(SLEEP_BETWEEN_REQUESTS)
 
-        if all_rows:
-            save_csv(ccaa, all_rows, today)
-            total_products += len(all_rows)
-        else:
-            print(f"⚠️ {ccaa}: no se generaron productos")
+        total_products += save_csv(ccaa, all_rows, today)
 
     if total_products == 0:
         print("❌ No se han generado datos en ninguna CCAA")
         exit(1)
 
-    print(f"\n✅ Total productos generados: {total_products}")
-
+    print(f"\n✅ TOTAL productos generados: {total_products}")
 
 if __name__ == "__main__":
     main()
