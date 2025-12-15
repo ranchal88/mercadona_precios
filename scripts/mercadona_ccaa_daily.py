@@ -43,7 +43,7 @@ def save_data(ccaa, data):
     file_path = os.path.join(data_folder, ccaa, f"mercadona_{ccaa}_{date_str}.csv")
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     df = pd.DataFrame(data)
-    df.to_csv(file_path, index=False)
+    df.to_csv(file_path, index=False, sep=";", encoding="utf-8-sig")
     print(f"Datos guardados en {file_path}")
 
 # Scrapeo para cada CCAA
