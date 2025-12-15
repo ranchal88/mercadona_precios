@@ -175,6 +175,10 @@ def main():
                     )
 
         save_csv(ccaa, all_rows, today)
+    if not all_rows:
+    print("❌ No se han generado datos en ninguna CCAA")
+    exit(1)
+
 
 if __name__ == "__main__":
     main()
