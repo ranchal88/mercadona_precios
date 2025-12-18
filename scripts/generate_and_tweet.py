@@ -4,7 +4,8 @@ import tempfile
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
-import tweepy
+from scripts.x_publisher import post_tweet
+
 
 # ==============================
 # CONFIG
@@ -17,11 +18,6 @@ CCAA = "madrid"
 TOP_N = 3
 DAYS_WEEK = 7
 
-# Twitter / X
-TWITTER_API_KEY = os.environ["TWITTER_API_KEY"]
-TWITTER_API_SECRET = os.environ["TWITTER_API_SECRET"]
-TWITTER_ACCESS_TOKEN = os.environ["TWITTER_ACCESS_TOKEN"]
-TWITTER_ACCESS_TOKEN_SECRET = os.environ["TWITTER_ACCESS_TOKEN_SECRET"]
 
 # ==============================
 # HELPERS
@@ -178,19 +174,12 @@ def main():
         # SEND TWEET
         # ==============================
 
-        auth = tweepy.OAuth1UserHandler(
-            TWITTER_API_KEY,
-            TWITTER_API_SECRET,
-            TWITTER_ACCESS_TOKEN,
-            TWITTER_ACCESS_TOKEN_SECRET
-        )
-
-        api = tweepy.API(auth)
-        api.update_status(tweet)
-
+        post_tweet(tweet)
         print("✅ Tweet publicado:")
         print(tweet)
 
+
+       
 
 if __name__ == "__main__":
     main()
