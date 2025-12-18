@@ -5,6 +5,7 @@ import os
 
 COOKIE_FILE = os.environ.get("X_COOKIES_FILE", "cookies.json")
 
+
 def _normalize_cookies(raw_cookies):
     cookies = []
     for c in raw_cookies:
