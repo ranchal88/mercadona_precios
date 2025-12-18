@@ -5,3 +5,5 @@ data/
 # Ignorar archivos de Python compilados
 __pycache__/
 *.pyc
+
+cookies.json
