@@ -2,11 +2,12 @@ name: Daily Mercadona Scrape
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 00:00 UTC (01:00 Madrid invierno)
+    - cron: '0 0 * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   scrape:
@@ -37,19 +38,17 @@ jobs:
           TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}
         run: python scripts/generate_and_tweet.py
 
-
       - name: Package data
         run: |
           DATE=$(date -u +%F)
           echo "DATE=$DATE" >> $GITHUB_ENV
-      
+
           if [ -d "data" ]; then
             zip -r "mercadona_ccaa_${DATE}.zip" data
           else
             echo "❌ data/ directory not found. Scraper probably failed."
             exit 1
           fi
-
 
       - name: Create GitHub Release + upload zip
         uses: softprops/action-gh-release@v2
