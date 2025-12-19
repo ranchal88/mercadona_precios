@@ -59,6 +59,64 @@ def download_csv_from_release(release, tmpdir):
 def load_csv(path):
     return pd.read_csv(path, sep=";")
 
+
+MAX_TWEET_LEN = 280
+
+def build_tweet(lines):
+    """
+    Construye un tweet a partir de líneas y lo recorta de forma controlada
+    manteniendo el header y añadiendo un footer con fuente/hashtags.
+    """
+    footer = "Datos: mercadona.es · #Mercadona #Precios"
+    base = "\n".join(lines)
+
+    # Si cabe, perfecto
+    if len(base) <= MAX_TWEET_LEN:
+        return base
+
+    # Estrategia: garantizar header + footer y recortar el cuerpo
+    # 1) Detectar header (primeras ~4 líneas) y mantenerlo siempre
+    header_lines = []
+    body_lines = []
+    for i, line in enumerate(lines):
+        # conserva siempre las primeras 4 líneas y las líneas vacías iniciales
+        if i < 6:
+            header_lines.append(line)
+        else:
+            body_lines.append(line)
+
+    header = "\n".join(header_lines).strip()
+    # Siempre dejamos una línea en blanco entre header y body
+    header_block = header + "\n\n" if header else ""
+
+    # Reservar espacio para footer + separador
+    footer_block = "\n\n" + footer
+    available = MAX_TWEET_LEN - len(header_block) - len(footer_block)
+
+    # Si ni siquiera cabe header+footer, recorta brutal pero seguro
+    if available < 20:
+        short = (header_block + footer)[:MAX_TWEET_LEN-1] + "…"
+        return short
+
+    # Construir body hasta que quepa
+    kept = []
+    used = 0
+    for line in body_lines:
+        # +1 por el salto de línea (aprox)
+        add = (len(line) + 1)
+        if used + add > available:
+            break
+        kept.append(line)
+        used += add
+
+    body = "\n".join(kept).strip()
+
+    # Si se recortó algo, añadimos "…"
+    candidate = header_block + body + footer_block
+    if len(candidate) > MAX_TWEET_LEN:
+        candidate = candidate[:MAX_TWEET_LEN-1] + "…"
+    return candidate
+
 # ==============================
 # MAIN LOGIC
 # ==============================
@@ -172,7 +230,8 @@ def main():
         lines.append("")
         lines.append("#Mercadona #Precios #Inflación")
 
-        tweet = "\n".join(lines)
+        tweet = build_tweet(lines)
+
 
         # ==============================
         # SEND TWEET
