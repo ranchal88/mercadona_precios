@@ -57,11 +57,38 @@ def post_tweet(text: str, headless: bool = True):
         textbox = page.get_by_role("textbox")
         textbox.wait_for(timeout=15000)
         textbox.click()
-        textbox.type(text, delay=25)
-
+        
+        # Inyectar texto de forma compatible con React (X)
+        page.evaluate(
+            """
+            (text) => {
+                const box = document.querySelector('div[role="textbox"]');
+                box.focus();
+                box.innerText = text;
+                box.dispatchEvent(new InputEvent('input', { bubbles: true }));
+            }
+            """,
+            text
+        )
+        
+        # Forzar blur
+        page.keyboard.press("Tab")
+        
         tweet_button = page.get_by_test_id("tweetButton")
-        tweet_button.wait_for(timeout=15000)
+        
+        page.wait_for_function(
+            """
+            () => {
+                const btn = document.querySelector('[data-testid="tweetButton"]');
+                return btn && btn.getAttribute('aria-disabled') !== 'true';
+            }
+            """,
+            timeout=20000
+        )
+        
         tweet_button.click()
+
+
 
         page.wait_for_timeout(3000)
         browser.close()
