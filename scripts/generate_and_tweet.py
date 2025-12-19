@@ -1,10 +1,14 @@
+import sys
 import os
+sys.path.append(os.path.dirname(__file__))
+
 import zipfile
 import tempfile
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
-from scripts.x_publisher import post_tweet
+from x_publisher import post_tweet
+
 
 
 # ==============================
