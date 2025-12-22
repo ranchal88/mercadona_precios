@@ -76,15 +76,38 @@ def post_tweet(text: str, headless: bool = True):
         
         tweet_button = page.get_by_test_id("tweetButton")
         
-        page.wait_for_function(
-            """
-            () => {
-                const btn = document.querySelector('[data-testid="tweetButton"]');
-                return btn && btn.getAttribute('aria-disabled') !== 'true';
-            }
-            """,
-            timeout=20000
-        )
+        # Forzar escritura en TODOS los textbox activos (X a veces duplica)
+	page.evaluate(
+    	"""
+    	(text) => {
+        	const boxes = document.querySelectorAll('div[role="textbox"]');
+        	boxes.forEach(box => {
+            	box.focus();
+            	box.innerText = text;
+            	box.dispatchEvent(new InputEvent('input', { bubbles: true }));
+        	});
+    	}
+    	""",
+    	text
+	)
+
+	# Forzar blur global
+	page.keyboard.press("Tab")
+
+	tweet_button = page.get_by_test_id("tweetButton")
+
+	# Esperar a que exista y click forzado (JS-level)
+	tweet_button.wait_for(timeout=20000)
+
+	page.evaluate(
+    	"""
+    	() => {
+        	const btn = document.querySelector('[data-testid="tweetButton"]');
+        	btn.click();
+    	}
+    	"""
+	)
+
         
         tweet_button.click()
 
