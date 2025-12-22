@@ -109,9 +109,9 @@ def post_tweet(text: str, headless: bool = True):
 	)
 
         
-        tweet_button.click()
+    tweet_button.click()
 
 
 
-        page.wait_for_timeout(3000)
-        browser.close()
+    page.wait_for_timeout(3000)
+    browser.close()
