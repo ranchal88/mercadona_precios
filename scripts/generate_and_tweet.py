@@ -203,6 +203,9 @@ def main():
         print("\n--- CONTENIDO ---\n")
         print(text)
 
-
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("⚠️ Error generando TXT:", e)
+        print("⚠️ El workflow continúa sin informe")
