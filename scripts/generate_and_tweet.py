@@ -15,6 +15,7 @@ GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 CCAA = "madrid"
 TOP_N = 3
 DAYS_WEEK = 7
+BASELINE_DATE = datetime(2026, 1, 4).date()
 BASELINE_LABEL = "01/01/2026"
 
 OUTPUT_DIR = "output"
@@ -22,6 +23,19 @@ OUTPUT_DIR = "output"
 # ==============================
 # GITHUB HELPERS
 # ==============================
+
+def find_release_on_or_after(releases, target_date):
+    """
+    Devuelve el primer release cuya fecha (created_at) sea >= target_date
+    """
+    for r in releases:
+        created = datetime.fromisoformat(
+            r["created_at"].replace("Z", "")
+        ).date()
+        if created >= target_date:
+            return r
+    return None
+
 
 def gh_headers():
     return {
@@ -69,8 +83,13 @@ def main():
     with tempfile.TemporaryDirectory() as tmpdir:
         releases = get_releases()
 
-        baseline_release = releases[0]
+        baseline_release = find_release_on_or_after(releases, BASELINE_DATE)
         latest_release = releases[-1]
+        if not baseline_release:
+            raise RuntimeError(
+                f"No se encontró release a partir de {BASELINE_LABEL}"
+            )
+
 
         week_release = None
         for r in releases:
