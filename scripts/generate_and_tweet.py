@@ -175,7 +175,7 @@ def main():
             "📊 Precios Mercadona · Madrid",
             "",
             f"Desde {BASELINE_LABEL}:",
-            f"📈 Precio medio {avg_change:+.1f}%",
+            f"📈 Precio medio {avg_change:+.4f}%",
             "",
             "⬆️ Top subidas desde inicio de 2026:"
         ]
