@@ -9,33 +9,21 @@ from datetime import datetime, timedelta
 # CONFIG
 # ==============================
 
-REPO = os.environ["GITHUB_REPOSITORY"]   # ej: ranchal88/mercadona_precios
+REPO = os.environ["GITHUB_REPOSITORY"]
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 
 CCAA = "madrid"
 TOP_N = 3
 DAYS_WEEK = 7
+
 BASELINE_DATE = datetime(2026, 1, 4).date()
-BASELINE_LABEL = "01/01/2026"
+BASELINE_LABEL = "04/01/2026"
 
 OUTPUT_DIR = "output"
 
 # ==============================
 # GITHUB HELPERS
 # ==============================
-
-def find_release_on_or_after(releases, target_date):
-    """
-    Devuelve el primer release cuya fecha (created_at) sea >= target_date
-    """
-    for r in releases:
-        created = datetime.fromisoformat(
-            r["created_at"].replace("Z", "")
-        ).date()
-        if created >= target_date:
-            return r
-    return None
-
 
 def gh_headers():
     return {
@@ -49,26 +37,73 @@ def get_releases():
     r.raise_for_status()
     return sorted(r.json(), key=lambda x: x["created_at"])
 
-def extract_csv_from_release(release, tmpdir):
-    for asset in release["assets"]:
-        if asset["name"].endswith(".zip"):
-            r = requests.get(asset["browser_download_url"])
-            zip_path = os.path.join(tmpdir, asset["name"])
-
-            with open(zip_path, "wb") as f:
-                f.write(r.content)
-
-            with zipfile.ZipFile(zip_path) as z:
-                for name in z.namelist():
-                    if name.endswith(f"data/{CCAA}/") or not name.endswith(".csv"):
-                        continue
-                    if f"data/{CCAA}/mercadona_{CCAA}_" in name:
-                        z.extract(name, tmpdir)
-                        return os.path.join(tmpdir, name)
+def find_release_on_or_after(releases, target_date):
+    for r in releases:
+        created = datetime.fromisoformat(
+            r["created_at"].replace("Z", "")
+        ).date()
+        if created >= target_date:
+            return r
     return None
 
-def load_csv(path):
-    return pd.read_csv(path, sep=";")
+def extract_csv_from_release(release, tmpdir):
+    for asset in release["assets"]:
+        if not asset["name"].endswith(".zip"):
+            continue
+
+        r = requests.get(asset["browser_download_url"])
+        zip_path = os.path.join(tmpdir, asset["name"])
+
+        with open(zip_path, "wb") as f:
+            f.write(r.content)
+
+        with zipfile.ZipFile(zip_path) as z:
+            for name in z.namelist():
+                if not name.endswith(".csv"):
+                    continue
+                if f"data/{CCAA}/mercadona_{CCAA}_" in name:
+                    z.extract(name, tmpdir)
+                    return os.path.join(tmpdir, name)
+    return None
+
+# ==============================
+# DATA LOADING (ROBUSTO)
+# ==============================
+
+def load_csv_clean(path: str) -> pd.DataFrame:
+    df = pd.read_csv(
+        path,
+        sep=";",
+        engine="python",
+        on_bad_lines="skip"
+    )
+
+    df = df[["product_id", "product_name", "price"]].copy()
+    df["product_id"] = df["product_id"].astype(str).str.strip()
+
+    df["price"] = (
+        df["price"]
+        .astype(str)
+        .str.replace(",", ".", regex=False)
+        .str.strip()
+    )
+    df["price"] = pd.to_numeric(df["price"], errors="coerce")
+
+    df = df[df["price"].notna()]
+    df = df[df["price"] > 0]
+
+    return df
+
+def aggregate_by_product(df: pd.DataFrame, suffix: str) -> pd.DataFrame:
+    return (
+        df.groupby("product_id", as_index=False)
+          .agg(
+              **{
+                  f"product_name{suffix}": ("product_name", "first"),
+                  f"price{suffix}": ("price", "mean"),
+              }
+          )
+    )
 
 # ==============================
 # MAIN
@@ -85,71 +120,71 @@ def main():
 
         baseline_release = find_release_on_or_after(releases, BASELINE_DATE)
         latest_release = releases[-1]
+
         if not baseline_release:
-            raise RuntimeError(
-                f"No se encontró release a partir de {BASELINE_LABEL}"
-            )
+            raise RuntimeError("No se encontró release baseline válido")
 
-
-        week_release = None
-        for r in releases:
-            if week_date.isoformat() in r["tag_name"]:
-                week_release = r
-                break
+        week_release = next(
+            (r for r in releases if week_date.isoformat() in r["tag_name"]),
+            None
+        )
 
         base_csv = extract_csv_from_release(baseline_release, tmpdir)
         today_csv = extract_csv_from_release(latest_release, tmpdir)
         week_csv = extract_csv_from_release(week_release, tmpdir) if week_release else None
 
         if not base_csv or not today_csv:
-            raise RuntimeError("No se ha podido cargar baseline o CSV de hoy")
-
-        df_base = load_csv(base_csv)
-        df_today = load_csv(today_csv)
+            raise RuntimeError("No se pudo cargar CSV baseline o today")
 
         # ==============================
-        # DESDE INICIO 2026 (BASELINE)
+        # CARGA Y NORMALIZACIÓN
         # ==============================
 
-        df_hist = df_today.merge(
-            df_base[["product_id", "price"]],
-            on="product_id",
-            suffixes=("_today", "_base")
-        )
+        df_base_raw = load_csv_clean(base_csv)
+        df_today_raw = load_csv_clean(today_csv)
 
-        df_hist = df_hist[df_hist["price_base"] > 0]
+        df_base = aggregate_by_product(df_base_raw, "_base")
+        df_today = aggregate_by_product(df_today_raw, "_today")
+
+        df_hist = df_today.merge(df_base, on="product_id", how="inner")
+
+        # ==============================
+        # PRECIO MEDIO (VARIACIÓN REAL)
+        # ==============================
+
+        mean_base = df_hist["price_base"].mean()
+        mean_today = df_hist["price_today"].mean()
+
+        avg_change = ((mean_today - mean_base) / mean_base) * 100
+        if abs(avg_change) < 0.00005:
+            avg_change = 0.0
+
+        # ==============================
+        # TOPS (POR PRODUCTO)
+        # ==============================
+
         df_hist["pct_change"] = (
             (df_hist["price_today"] - df_hist["price_base"])
             / df_hist["price_base"] * 100
         )
 
-        avg_change = df_hist["pct_change"].mean()
+        df_changes = df_hist[df_hist["pct_change"] != 0]
 
-        top_up_hist = df_hist.sort_values("pct_change", ascending=False).head(TOP_N)
-        top_down_hist = df_hist.sort_values("pct_change").head(TOP_N)
+        top_up = df_changes.sort_values("pct_change", ascending=False).head(TOP_N)
+        top_down = df_changes.sort_values("pct_change").head(TOP_N)
 
         # ==============================
         # ÚLTIMA SEMANA
         # ==============================
 
-        weekly_block = [
-            "Última semana:",
-            "Sin histórico suficiente"
-        ]
-
-        top_up_week = []
-        top_down_week = []
+        weekly_block = ["Última semana:", "Sin histórico suficiente"]
 
         if week_csv:
-            df_week = load_csv(week_csv)
+            df_week_raw = load_csv_clean(week_csv)
+            df_week = aggregate_by_product(df_week_raw, "_week")
 
-            df_w = df_today.merge(
-                df_week[["product_id", "price"]],
-                on="product_id",
-                suffixes=("_today", "_week")
-            )
+            df_w = df_today.merge(df_week, on="product_id", how="inner")
 
-            df_w = df_w[df_w["price_week"] > 0]
             df_w["pct_change"] = (
                 (df_w["price_today"] - df_w["price_week"])
                 / df_w["price_week"] * 100
@@ -164,9 +199,6 @@ def main():
                 f"🔻 {len(downs)} productos bajan"
             ]
 
-            top_up_week = ups.sort_values("pct_change", ascending=False).head(TOP_N)
-            top_down_week = downs.sort_values("pct_change").head(TOP_N)
-
         # ==============================
         # BUILD TXT
         # ==============================
@@ -180,29 +212,23 @@ def main():
             "⬆️ Top subidas desde inicio de 2026:"
         ]
 
-        for _, r in top_up_hist.iterrows():
-            lines.append(f"• {r['product_name']} ({r['pct_change']:+.1f}%)")
+        if top_up.empty:
+            lines.append("Sin cambios relevantes")
+        else:
+            for _, r in top_up.iterrows():
+                lines.append(f"• {r['product_name_today']} ({r['pct_change']:+.1f}%)")
 
         lines.append("")
         lines.append("⬇️ Top bajadas desde inicio de 2026:")
 
-        for _, r in top_down_hist.iterrows():
-            lines.append(f"• {r['product_name']} ({r['pct_change']:+.1f}%)")
+        if top_down.empty:
+            lines.append("Sin cambios relevantes")
+        else:
+            for _, r in top_down.iterrows():
+                lines.append(f"• {r['product_name_today']} ({r['pct_change']:+.1f}%)")
 
         lines.append("")
         lines.extend(weekly_block)
-
-        if len(top_up_week) > 0:
-            lines.append("")
-            lines.append("⬆️ Top subidas esta semana:")
-            for _, r in top_up_week.iterrows():
-                lines.append(f"• {r['product_name']} ({r['pct_change']:+.1f}%)")
-
-        if len(top_down_week) > 0:
-            lines.append("")
-            lines.append("⬇️ Top bajadas esta semana:")
-            for _, r in top_down_week.iterrows():
-                lines.append(f"• {r['product_name']} ({r['pct_change']:+.1f}%)")
 
         lines.append("")
         lines.append("#Mercadona #Precios #Inflación")
@@ -217,14 +243,16 @@ def main():
         with open(out_file, "w", encoding="utf-8") as f:
             f.write(text)
 
-        print("✅ TXT generado:")
-        print(out_file)
-        print("\n--- CONTENIDO ---\n")
+        print("✅ TXT generado")
         print(text)
+
+# ==============================
+# ENTRYPOINT
+# ==============================
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
         print("⚠️ Error generando TXT:", e)
-        print("⚠️ El workflow continúa sin informe")
+        print("⚠️ Workflow continúa sin informe")
