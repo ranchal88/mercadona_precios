@@ -17,7 +17,7 @@ TOP_N = 3
 DAYS_WEEK = 7
 
 BASELINE_DATE = datetime(2026, 1, 4).date()
-BASELINE_LABEL = "04/01/2026"
+BASELINE_LABEL = "enero de 2026"
 
 OUTPUT_DIR = "output"
 
@@ -209,23 +209,31 @@ def main():
             f"Desde {BASELINE_LABEL}:",
             f"📈 Precio medio {avg_change:+.4f}%",
             "",
-            "⬆️ Top subidas desde inicio de 2026:"
+            "⬆️ Top subidas desde enero de 2026:"
         ]
 
         if top_up.empty:
             lines.append("Sin cambios relevantes")
         else:
             for _, r in top_up.iterrows():
-                lines.append(f"• {r['product_name_today']} ({r['pct_change']:+.1f}%)")
+                lines.append(
+                    f"• {r['product_name_today']} "
+                    f"({r['pct_change']:+.1f}%): "
+                    f"{r['price_base']:.2f}€ → {r['price_today']:.2f}€"
+                )
 
         lines.append("")
-        lines.append("⬇️ Top bajadas desde inicio de 2026:")
+        lines.append("⬇️ Top bajadas desde enero de 2026:")
 
         if top_down.empty:
             lines.append("Sin cambios relevantes")
         else:
             for _, r in top_down.iterrows():
-                lines.append(f"• {r['product_name_today']} ({r['pct_change']:+.1f}%)")
+                lines.append(
+                    f"• {r['product_name_today']} "
+                    f"({r['pct_change']:+.1f}%): "
+                    f"{r['price_base']:.2f}€ → {r['price_today']:.2f}€"
+                )
 
         lines.append("")
         lines.extend(weekly_block)
