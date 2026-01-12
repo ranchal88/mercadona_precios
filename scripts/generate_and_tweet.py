@@ -45,16 +45,10 @@ def get_releases():
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 def extract_date_from_release(release):
-    """
-    Extrae YYYY-MM-DD del tag_name o del nombre del asset ZIP.
-    Devuelve date o None.
-    """
-    # 1️⃣ Intentar tag_name
     m = DATE_RE.search(release.get("tag_name", ""))
     if m:
         return datetime.strptime(m.group(), "%Y-%m-%d").date()
 
-    # 2️⃣ Intentar nombre del asset
     for asset in release.get("assets", []):
         m = DATE_RE.search(asset.get("name", ""))
         if m:
@@ -73,7 +67,7 @@ def select_releases_by_date(releases):
         raise RuntimeError("No se pudo extraer fecha de ningún release")
 
     dated.sort(key=lambda x: x[0])
-    return dated  # lista ordenada (date, release)
+    return dated
 
 # ==============================
 # ZIP / CSV EXTRACTION
@@ -106,13 +100,7 @@ def extract_csv_from_release(release, tmpdir):
 # ==============================
 
 def load_csv_clean(path):
-    df = pd.read_csv(
-        path,
-        sep=";",
-        engine="python",
-        on_bad_lines="skip"
-    )
-
+    df = pd.read_csv(path, sep=";", engine="python", on_bad_lines="skip")
     df = df[["product_id", "product_name", "price"]].copy()
 
     df["product_id"] = df["product_id"].astype(str).str.strip()
@@ -124,9 +112,7 @@ def load_csv_clean(path):
     )
     df["price"] = pd.to_numeric(df["price"], errors="coerce")
 
-    df = df[df["price"].notna() & (df["price"] > 0)]
-
-    return df
+    return df[df["price"].notna() & (df["price"] > 0)]
 
 def aggregate_by_product(df, suffix):
     return (
@@ -145,7 +131,6 @@ def aggregate_by_product(df, suffix):
 
 def main():
     today = datetime.utcnow().date()
-    week_date = today - timedelta(days=DAYS_WEEK)
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -153,22 +138,20 @@ def main():
         releases = get_releases()
         dated_releases = select_releases_by_date(releases)
 
-        # Baseline: primer release >= BASELINE_DATE
-        baseline = next(
-            (r for d, r in dated_releases if d >= BASELINE_DATE),
-            None
-        )
+        # Baseline
+        baseline = next((r for d, r in dated_releases if d >= BASELINE_DATE), None)
         if not baseline:
             raise RuntimeError("No se encontró baseline válido")
 
-        # Latest: mayor fecha disponible
+        # Latest
         latest_date, latest = dated_releases[-1]
 
-        # Week release: más cercano <= week_date
-        week = None
+        # Semana: dataset más reciente <= latest_date - 7
+        week_target_date = latest_date - timedelta(days=DAYS_WEEK)
+        week_release = None
         for d, r in reversed(dated_releases):
-            if d <= week_date:
-                week = r
+            if d <= week_target_date:
+                week_release = r
                 break
 
         # ==============================
@@ -177,20 +160,16 @@ def main():
 
         base_csv = extract_csv_from_release(baseline, tmpdir)
         today_csv = extract_csv_from_release(latest, tmpdir)
-        week_csv = extract_csv_from_release(week, tmpdir) if week else None
+        week_csv = extract_csv_from_release(week_release, tmpdir) if week_release else None
 
         # ==============================
-        # CARGA Y NORMALIZACIÓN
+        # BASELINE vs TODAY
         # ==============================
 
         df_base = aggregate_by_product(load_csv_clean(base_csv), "_base")
         df_today = aggregate_by_product(load_csv_clean(today_csv), "_today")
 
         df_hist = df_today.merge(df_base, on="product_id", how="inner")
-
-        # ==============================
-        # PRECIO MEDIO (VARIACIÓN REAL)
-        # ==============================
 
         mean_base = df_hist["price_base"].mean()
         mean_today = df_hist["price_today"].mean()
@@ -199,19 +178,52 @@ def main():
         if abs(avg_change) < 0.00005:
             avg_change = 0.0
 
-        # ==============================
-        # TOPS
-        # ==============================
-
         df_hist["pct_change"] = (
             (df_hist["price_today"] - df_hist["price_base"])
             / df_hist["price_base"] * 100
         )
 
         df_changes = df_hist[df_hist["pct_change"] != 0]
-
         top_up = df_changes.sort_values("pct_change", ascending=False).head(TOP_N)
         top_down = df_changes.sort_values("pct_change").head(TOP_N)
+
+        # ==============================
+        # ÚLTIMA SEMANA
+        # ==============================
+
+        week_block = ["Última semana:", "Sin histórico suficiente"]
+
+        if week_csv:
+            df_week = aggregate_by_product(load_csv_clean(week_csv), "_week")
+            df_w = df_today.merge(df_week, on="product_id", how="inner")
+
+            df_w["pct_change"] = (
+                (df_w["price_today"] - df_w["price_week"])
+                / df_w["price_week"] * 100
+            )
+
+            df_w_changes = df_w[df_w["pct_change"] != 0]
+
+            if not df_w_changes.empty:
+                up_w = df_w_changes.sort_values("pct_change", ascending=False).head(TOP_N)
+                down_w = df_w_changes.sort_values("pct_change").head(TOP_N)
+
+                week_block = ["Última semana:", "⬆️ Top subidas:"]
+                for _, r in up_w.iterrows():
+                    week_block.append(
+                        f"• {r['product_name_today']} "
+                        f"({r['pct_change']:+.1f}%): "
+                        f"{r['price_week']:.2f}€ → {r['price_today']:.2f}€"
+                    )
+
+                week_block.append("")
+                week_block.append("⬇️ Top bajadas:")
+                for _, r in down_w.iterrows():
+                    week_block.append(
+                        f"• {r['product_name_today']} "
+                        f"({r['pct_change']:+.1f}%): "
+                        f"{r['price_week']:.2f}€ → {r['price_today']:.2f}€"
+                    )
 
         # ==============================
         # BUILD TXT
@@ -226,40 +238,34 @@ def main():
             "⬆️ Top subidas desde enero de 2026:"
         ]
 
-        if top_up.empty:
-            lines.append("Sin cambios relevantes")
-        else:
-            for _, r in top_up.iterrows():
-                lines.append(
-                    f"• {r['product_name_today']} "
-                    f"({r['pct_change']:+.1f}%): "
-                    f"{r['price_base']:.2f}€ → {r['price_today']:.2f}€"
-                )
+        for _, r in top_up.iterrows():
+            lines.append(
+                f"• {r['product_name_today']} "
+                f"({r['pct_change']:+.1f}%): "
+                f"{r['price_base']:.2f}€ → {r['price_today']:.2f}€"
+            )
 
         lines.append("")
         lines.append("⬇️ Top bajadas desde enero de 2026:")
+        for _, r in top_down.iterrows():
+            lines.append(
+                f"• {r['product_name_today']} "
+                f"({r['pct_change']:+.1f}%): "
+                f"{r['price_base']:.2f}€ → {r['price_today']:.2f}€"
+            )
 
-        if top_down.empty:
-            lines.append("Sin cambios relevantes")
-        else:
-            for _, r in top_down.iterrows():
-                lines.append(
-                    f"• {r['product_name_today']} "
-                    f"({r['pct_change']:+.1f}%): "
-                    f"{r['price_base']:.2f}€ → {r['price_today']:.2f}€"
-                )
-
+        lines.append("")
+        lines.extend(week_block)
         lines.append("")
         lines.append("#Mercadona #Precios #Inflación")
 
         text = "\n".join(lines)
 
-        out_file = os.path.join(
-            OUTPUT_DIR,
-            f"tweet_madrid_{today.isoformat()}.txt"
-        )
-
-        with open(out_file, "w", encoding="utf-8") as f:
+        with open(
+            os.path.join(OUTPUT_DIR, f"tweet_madrid_{today.isoformat()}.txt"),
+            "w",
+            encoding="utf-8"
+        ) as f:
             f.write(text)
 
         print("✅ TXT generado con datos de:", latest_date)
@@ -270,8 +276,4 @@ def main():
 # ==============================
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print("❌ ERROR CRÍTICO:", e)
-        raise
+    main()
