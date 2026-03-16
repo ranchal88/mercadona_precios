@@ -1,9 +1,8 @@
-# scripts/x_publisher.py
+﻿# scripts/x_publisher.py
 import json
 import os
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-
 
 COOKIE_FILE = os.environ.get("X_COOKIES_FILE", "cookies.json")
 
@@ -69,9 +68,36 @@ def post_tweet(text: str, media_paths=None, headless: bool = True):
             file_input.set_input_files(media_paths)
             page.wait_for_timeout(5000)
 
+        page.evaluate(
+            """
+            (text) => {
+                const boxes = document.querySelectorAll('div[role="textbox"]');
+                boxes.forEach(box => {
+                    box.focus();
+                    box.innerText = text;
+                    box.dispatchEvent(new InputEvent('input', { bubbles: true }));
+                });
+            }
+            """,
+            text
+        )
+
+        page.keyboard.press("Tab")
+
         tweet_button = page.get_by_test_id("tweetButton")
         tweet_button.wait_for(timeout=20000)
-        tweet_button.click()
 
-        page.wait_for_timeout(5000)
+        page.evaluate(
+            """
+            () => {
+                const btn = document.querySelector('[data-testid="tweetButton"]');
+                if (btn) {
+                    btn.click();
+                }
+            }
+            """
+        )
+
+        tweet_button.click()
+        page.wait_for_timeout(3000)
         browser.close()
