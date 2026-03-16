@@ -1,4 +1,4 @@
-name: Post Mercadona Top Up
+name: Generate Mercadona Top Up Assets
 
 on:
   schedule:
@@ -10,7 +10,7 @@ permissions:
   actions: read
 
 jobs:
-  post_top_up:
+  generate_top_up_assets:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,43 +22,25 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zip
-
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install Playwright browsers
-        run: |
-          playwright install chromium
-
-      - name: Restore X cookies
-        run: |
-          echo '${{ secrets.X_COOKIES }}' > cookies.json
-
-      - name: Generate assets and publish top up tweet
+      - name: Generate top up assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          CONTENT_TYPE: up
           CCAA: madrid
           TOP_N: 5
           DAYS_WEEK: 7
-          HEADLESS: true
-          MAX_DATA_AGE_DAYS: 1
-          ALLOW_STALE: false
         run: |
-          python scripts/generate_and_tweet.py
+          python scripts/generate_assets_only.py
 
       - name: Upload outputs as workflow artifact
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: outputs-post-top-up
           path: outputs/
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
