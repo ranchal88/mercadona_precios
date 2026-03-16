@@ -48,37 +48,39 @@ def write_text_file(filename: str, text: str) -> str:
 
 def build_avg_tweet(summary, ccaa: str) -> str:
     return (
-        f"📊 Precio medio Mercadona {ccaa.capitalize()}\n\n"
-        f"Desde {summary.baseline_date}:\n"
+        f"📊 Precio medio Mercadona {ccaa.capitalize()} · {summary.latest_date}\n\n"
+        f"Desde enero de 2026:\n"
         f"{fmt_pct(summary.avg_change)}"
     )
 
 
-def build_top_up_tweet(summary) -> str:
+def build_top_up_tweet(summary, ccaa: str) -> str:
     if summary.top_up.empty:
         return "📈 No hay suficiente histórico para calcular el producto que más sube."
 
     r = summary.top_up.iloc[0]
+
     return (
-        "📈 Producto que más sube en Mercadona\n\n"
+        f"📈 Producto que más sube en Mercadona · {ccaa.capitalize()} · {summary.latest_date}\n\n"
+        f"Desde enero de 2026:\n"
         f"{r['product_name']}\n\n"
         f"{fmt_pct(r['pct_change'])}\n\n"
         f"{fmt_eur(r['price_base'])} → {fmt_eur(r['price_today'])}"
     )
 
-
-def build_top_down_tweet(summary) -> str:
+def build_top_down_tweet(summary, ccaa: str) -> str:
     if summary.top_down.empty:
         return "📉 No hay suficiente histórico para calcular el producto que más baja."
 
     r = summary.top_down.iloc[0]
+
     return (
-        "📉 Producto que más baja en Mercadona\n\n"
+        f"📉 Producto que más baja en Mercadona · {ccaa.capitalize()} · {summary.latest_date}\n\n"
+        f"Desde enero de 2026:\n"
         f"{r['product_name']}\n\n"
         f"{fmt_pct(r['pct_change'])}\n\n"
         f"{fmt_eur(r['price_base'])} → {fmt_eur(r['price_today'])}"
     )
-
 
 def main():
     ensure_output_dir()
@@ -122,8 +124,8 @@ def main():
         index_df = build_price_index_series(snapshots_with_df)
 
         avg_tweet = build_avg_tweet(summary, CCAA)
-        top_up_tweet = build_top_up_tweet(summary)
-        top_down_tweet = build_top_down_tweet(summary)
+        top_up_tweet = build_top_up_tweet(summary, CCAA)
+        top_down_tweet = build_top_down_tweet(summary, CCAA)
 
         avg_txt = write_text_file("tweet_avg_price.txt", avg_tweet)
         up_txt = write_text_file("tweet_top_up.txt", top_up_tweet)
