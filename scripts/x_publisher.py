@@ -1,7 +1,9 @@
 # scripts/x_publisher.py
 import json
-from playwright.sync_api import sync_playwright
 import os
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+
 
 COOKIE_FILE = os.environ.get("X_COOKIES_FILE", "cookies.json")
 
@@ -21,7 +23,7 @@ def _normalize_cookies(raw_cookies):
         if "expirationDate" in c:
             cookie["expires"] = int(c["expirationDate"])
 
-        same_site = c.get("sameSite", "").lower()
+        same_site = str(c.get("sameSite", "")).lower()
         if same_site == "lax":
             cookie["sameSite"] = "Lax"
         elif same_site in ("no_restriction", "none"):
@@ -34,12 +36,15 @@ def _normalize_cookies(raw_cookies):
     return cookies
 
 
-def post_tweet(text: str, headless: bool = True):
+def post_tweet(text: str, media_paths=None, headless: bool = True):
     if not text or not text.strip():
         raise ValueError("Tweet vacío")
 
     if len(text) > 280:
-        raise ValueError("Tweet supera 280 caracteres")
+        raise ValueError(f"Tweet supera 280 caracteres: {len(text)}")
+
+    media_paths = media_paths or []
+    media_paths = [str(Path(p).resolve()) for p in media_paths]
 
     with open(COOKIE_FILE, "r", encoding="utf-8") as f:
         raw_cookies = json.load(f)
@@ -52,66 +57,21 @@ def post_tweet(text: str, headless: bool = True):
         context.add_cookies(cookies)
 
         page = context.new_page()
-        page.goto("https://x.com/compose/tweet", wait_until="domcontentloaded")
+        page.goto("https://x.com/compose/tweet", wait_until="networkidle")
 
-        textbox = page.get_by_role("textbox")
-        textbox.wait_for(timeout=15000)
+        textbox = page.locator('div[role="textbox"]').first
+        textbox.wait_for(timeout=20000)
         textbox.click()
-        
-        # Inyectar texto de forma compatible con React (X)
-        page.evaluate(
-            """
-            (text) => {
-                const box = document.querySelector('div[role="textbox"]');
-                box.focus();
-                box.innerText = text;
-                box.dispatchEvent(new InputEvent('input', { bubbles: true }));
-            }
-            """,
-            text
-        )
-        
-        # Forzar blur
-        page.keyboard.press("Tab")
-        
+        textbox.fill(text)
+
+        if media_paths:
+            file_input = page.locator('input[type="file"]')
+            file_input.set_input_files(media_paths)
+            page.wait_for_timeout(5000)
+
         tweet_button = page.get_by_test_id("tweetButton")
-        
-        # Forzar escritura en TODOS los textbox activos (X a veces duplica)
-	page.evaluate(
-    	"""
-    	(text) => {
-        	const boxes = document.querySelectorAll('div[role="textbox"]');
-        	boxes.forEach(box => {
-            	box.focus();
-            	box.innerText = text;
-            	box.dispatchEvent(new InputEvent('input', { bubbles: true }));
-        	});
-    	}
-    	""",
-    	text
-	)
-
-	# Forzar blur global
-	page.keyboard.press("Tab")
-
-	tweet_button = page.get_by_test_id("tweetButton")
-
-	# Esperar a que exista y click forzado (JS-level)
-	tweet_button.wait_for(timeout=20000)
-
-	page.evaluate(
-    	"""
-    	() => {
-        	const btn = document.querySelector('[data-testid="tweetButton"]');
-        	btn.click();
-    	}
-    	"""
-	)
-
-        
+        tweet_button.wait_for(timeout=20000)
         tweet_button.click()
 
-
-
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(5000)
         browser.close()

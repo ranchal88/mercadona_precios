@@ -1,248 +1,97 @@
-import sys
+# scripts/generate_and_tweet.py
 import os
-sys.path.append(os.path.dirname(__file__))
-
-import zipfile
 import tempfile
-import requests
 import pandas as pd
-from datetime import datetime, timedelta
+
+from generate_content_assets import main as generate_assets
 from x_publisher import post_tweet
+from release_data_loader import load_release_snapshots, get_latest_snapshot
 
 
+OUTPUT_DIR = "outputs"
+CONTENT_TYPE = os.environ.get("CONTENT_TYPE", "avg")  # avg | up | down
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
-# ==============================
-# CONFIG
-# ==============================
-
-REPO = os.environ["GITHUB_REPOSITORY"]   # ej: ranchal88/mercadona_precios
-GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
-
-CCAA = "madrid"
-TOP_N = 3
-DAYS_WEEK = 7
+# Guardarraíl
+MAX_DATA_AGE_DAYS = int(os.environ.get("MAX_DATA_AGE_DAYS", "1"))
+ALLOW_STALE = os.environ.get("ALLOW_STALE", "false").lower() == "true"
+CCAA = os.environ.get("CCAA", "madrid")
 
 
-# ==============================
-# HELPERS
-# ==============================
+def read_text(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read().strip()
 
-def github_headers():
-    return {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json"
+
+def resolve_assets(content_type: str) -> tuple[str, str]:
+    mapping = {
+        "avg": ("tweet_avg_price.txt", "tweet_avg_price.png"),
+        "up": ("tweet_top_up.txt", "tweet_top_up.png"),
+        "down": ("tweet_top_down.txt", "tweet_top_down.png"),
     }
 
-def get_releases():
-    url = f"https://api.github.com/repos/{REPO}/releases"
-    r = requests.get(url, headers=github_headers())
-    r.raise_for_status()
-    return sorted(r.json(), key=lambda x: x["created_at"])
+    if content_type not in mapping:
+        raise ValueError(f"CONTENT_TYPE inválido: {content_type}")
 
-def download_csv_from_release(release, tmpdir):
-    for asset in release["assets"]:
-        if asset["name"].endswith(".zip"):
-            r = requests.get(asset["browser_download_url"])
-            zippath = os.path.join(tmpdir, asset["name"])
-            with open(zippath, "wb") as f:
-                f.write(r.content)
-
-            with zipfile.ZipFile(zippath) as z:
-                for name in z.namelist():
-                    if name.endswith(f"{CCAA}/") or not name.endswith(".csv"):
-                        continue
-                    if f"{CCAA}/mercadona_{CCAA}_" in name:
-                        z.extract(name, tmpdir)
-                        return os.path.join(tmpdir, name)
-    return None
-
-def load_csv(path):
-    return pd.read_csv(path, sep=";")
+    txt_name, img_name = mapping[content_type]
+    return (
+        os.path.join(OUTPUT_DIR, txt_name),
+        os.path.join(OUTPUT_DIR, img_name),
+    )
 
 
-MAX_TWEET_LEN = 280
+def assert_fresh_release_data(ccaa: str, max_age_days: int, allow_stale: bool) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        snapshots = load_release_snapshots(ccaa, tmpdir)
 
-def build_tweet(lines):
-    """
-    Construye un tweet a partir de líneas y lo recorta de forma controlada
-    manteniendo el header y añadiendo un footer con fuente/hashtags.
-    """
-    footer = "Datos: mercadona.es · #Mercadona #Precios"
-    base = "\n".join(lines)
+        if not snapshots:
+            raise RuntimeError(f"No se han encontrado snapshots para {ccaa}")
 
-    # Si cabe, perfecto
-    if len(base) <= MAX_TWEET_LEN:
-        return base
+        latest_snap = get_latest_snapshot(snapshots)
+        latest_dt = pd.to_datetime(latest_snap.date_str).date()
+        today_utc = pd.Timestamp.utcnow().date()
 
-    # Estrategia: garantizar header + footer y recortar el cuerpo
-    # 1) Detectar header (primeras ~4 líneas) y mantenerlo siempre
-    header_lines = []
-    body_lines = []
-    for i, line in enumerate(lines):
-        # conserva siempre las primeras 4 líneas y las líneas vacías iniciales
-        if i < 6:
-            header_lines.append(line)
-        else:
-            body_lines.append(line)
+        age_days = (today_utc - latest_dt).days
 
-    header = "\n".join(header_lines).strip()
-    # Siempre dejamos una línea en blanco entre header y body
-    header_block = header + "\n\n" if header else ""
+        print(f"ℹ️ Último snapshot detectado para {ccaa}: {latest_dt} ({age_days} días de antigüedad)")
 
-    # Reservar espacio para footer + separador
-    footer_block = "\n\n" + footer
-    available = MAX_TWEET_LEN - len(header_block) - len(footer_block)
+        if age_days > max_age_days:
+            msg = (
+                f"❌ Datos demasiado antiguos para publicar en X. "
+                f"Último snapshot: {latest_dt} | hoy UTC: {today_utc} | "
+                f"antigüedad: {age_days} días | máximo permitido: {max_age_days}"
+            )
 
-    # Si ni siquiera cabe header+footer, recorta brutal pero seguro
-    if available < 20:
-        short = (header_block + footer)[:MAX_TWEET_LEN-1] + "…"
-        return short
+            if allow_stale:
+                print("⚠️ ALLOW_STALE=true, se continúa pese a histórico desactualizado.")
+                print(msg)
+                return
 
-    # Construir body hasta que quepa
-    kept = []
-    used = 0
-    for line in body_lines:
-        # +1 por el salto de línea (aprox)
-        add = (len(line) + 1)
-        if used + add > available:
-            break
-        kept.append(line)
-        used += add
+            raise RuntimeError(msg)
 
-    body = "\n".join(kept).strip()
-
-    # Si se recortó algo, añadimos "…"
-    candidate = header_block + body + footer_block
-    if len(candidate) > MAX_TWEET_LEN:
-        candidate = candidate[:MAX_TWEET_LEN-1] + "…"
-    return candidate
-
-# ==============================
-# MAIN LOGIC
-# ==============================
 
 def main():
-    today = datetime.utcnow().date()
-    week_date = today - timedelta(days=DAYS_WEEK)
+    # 1) Guardarraíl ANTES de generar/publicar
+    assert_fresh_release_data(
+        ccaa=CCAA,
+        max_age_days=MAX_DATA_AGE_DAYS,
+        allow_stale=ALLOW_STALE
+    )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        releases = get_releases()
+    # 2) Generar assets
+    generate_assets()
 
-        baseline_release = releases[0]
-        latest_release = releases[-1]
-        weekly_release = None
+    # 3) Resolver assets del tipo de contenido
+    txt_path, img_path = resolve_assets(CONTENT_TYPE)
+    tweet_text = read_text(txt_path)
 
-        for r in releases:
-            if week_date.isoformat() in r["tag_name"]:
-                weekly_release = r
-                break
+    # 4) Publicar
+    post_tweet(tweet_text, media_paths=[img_path], headless=HEADLESS)
 
-        baseline_csv = download_csv_from_release(baseline_release, tmpdir)
-        today_csv = download_csv_from_release(latest_release, tmpdir)
-        week_csv = download_csv_from_release(weekly_release, tmpdir) if weekly_release else None
+    print("✅ Tweet publicado")
+    print(f"Tipo: {CONTENT_TYPE}")
+    print(tweet_text)
 
-        if not baseline_csv or not today_csv:
-            raise RuntimeError("Baseline o CSV de hoy no encontrado")
-
-        df_base = load_csv(baseline_csv)
-        df_today = load_csv(today_csv)
-
-        df = df_today.merge(
-            df_base[["product_id", "price"]],
-            on="product_id",
-            suffixes=("_today", "_base")
-        )
-
-        df = df[df["price_base"] > 0]
-
-        df["pct_change"] = (df["price_today"] - df["price_base"]) / df["price_base"] * 100
-
-        avg_change = df["pct_change"].mean()
-
-        top_up_hist = df.sort_values("pct_change", ascending=False).head(TOP_N)
-        top_down_hist = df.sort_values("pct_change").head(TOP_N)
-
-        weekly_text = "Última semana:\nSin histórico suficiente"
-        top_up_week = []
-        top_down_week = []
-
-        if week_csv:
-            df_week = load_csv(week_csv)
-
-            dfw = df_today.merge(
-                df_week[["product_id", "price"]],
-                on="product_id",
-                suffixes=("_today", "_week")
-            )
-
-            dfw = dfw[dfw["price_week"] > 0]
-            dfw["pct_change"] = (dfw["price_today"] - dfw["price_week"]) / dfw["price_week"] * 100
-
-            ups = dfw[dfw["pct_change"] > 0]
-            downs = dfw[dfw["pct_change"] < 0]
-
-            weekly_text = (
-                f"Última semana:\n"
-                f"🔺 {len(ups)} productos suben\n"
-                f"🔻 {len(downs)} productos bajan"
-            )
-
-            top_up_week = ups.sort_values("pct_change", ascending=False).head(TOP_N)
-            top_down_week = downs.sort_values("pct_change").head(TOP_N)
-
-        # ==============================
-        # BUILD TWEET
-        # ==============================
-
-        lines = [
-            "📊 Precios Mercadona · Madrid",
-            "",
-            "Desde inicio del seguimiento:",
-            f"📈 Precio medio {avg_change:+.1f}%",
-            "",
-            "⬆️ Top subidas históricas:"
-        ]
-
-        for _, r in top_up_hist.iterrows():
-            lines.append(f"• {r['product_name']} ({r['pct_change']:+.1f}%)")
-
-        lines.append("")
-        lines.append("⬇️ Top bajadas históricas:")
-
-        for _, r in top_down_hist.iterrows():
-            lines.append(f"• {r['product_name']} ({r['pct_change']:+.1f}%)")
-
-        lines.append("")
-        lines.append(weekly_text)
-
-        if top_up_week is not None and len(top_up_week) > 0:
-            lines.append("")
-            lines.append("⬆️ Top subidas semanales:")
-            for _, r in top_up_week.iterrows():
-                lines.append(f"• {r['product_name']} ({r['pct_change']:+.1f}%)")
-
-        if top_down_week is not None and len(top_down_week) > 0:
-            lines.append("")
-            lines.append("⬇️ Top bajadas semanales:")
-            for _, r in top_down_week.iterrows():
-                lines.append(f"• {r['product_name']} ({r['pct_change']:+.1f}%)")
-
-        lines.append("")
-        lines.append("#Mercadona #Precios #Inflación")
-
-        tweet = build_tweet(lines)
-
-
-        # ==============================
-        # SEND TWEET
-        # ==============================
-
-        post_tweet(tweet)
-        print("✅ Tweet publicado:")
-        print(tweet)
-
-
-       
 
 if __name__ == "__main__":
     main()

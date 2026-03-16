@@ -148,6 +148,9 @@ def save_csv(ccaa: str, rows: List[Dict], date: str) -> int:
         subset=["date", "ccaa", "warehouse", "product_id"]
     )
 
+    df = df[df["price"].notna()].copy()
+    df = df.sort_values(["warehouse", "product_id"]).reset_index(drop=True)
+
     df.to_csv(
         file_path,
         index=False,
