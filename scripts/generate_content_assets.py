@@ -24,14 +24,14 @@ CCAA = os.environ.get("CCAA", "madrid")
 TOP_N = int(os.environ.get("TOP_N", "5"))
 DAYS_WEEK = int(os.environ.get("DAYS_WEEK", "7"))
 OUTPUT_DIR = "outputs"
-
+BASELINE_DATE = os.environ.get("BASELINE_DATE", "2026-01-04")
 
 def ensure_output_dir():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 def fmt_pct(x: float) -> str:
-    return f"{x:+.1f}%"
+    return f"{x:+.4f}%"
 
 
 def fmt_eur(x: float) -> str:
@@ -93,7 +93,14 @@ def main():
         latest_dt = pd.to_datetime(latest_snap.date_str)
         latest_year = latest_dt.year
 
-        base_snap = get_year_baseline_snapshot(snapshots, latest_year)
+        base_snap = next(
+            (s for s in snapshots if s.date_str == BASELINE_DATE),
+            None
+        )
+
+        if base_snap is None:
+            raise RuntimeError(f"No se ha encontrado snapshot para baseline {BASELINE_DATE}")
+        
         week_snap = get_snapshot_n_days_before(snapshots, latest_dt, DAYS_WEEK)
 
         df_latest = load_csv(latest_snap.csv_path)
