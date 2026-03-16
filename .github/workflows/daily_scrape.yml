@@ -36,9 +36,11 @@ jobs:
         run: python scripts/mercadona_ccaa_daily.py
 
       - name: Set UTC date
+        id: set_date
         run: |
           DATE=$(date -u +%F)
           echo "DATE=$DATE" >> $GITHUB_ENV
+          echo "date=$DATE" >> $GITHUB_OUTPUT
 
       - name: Package data folder
         run: |
@@ -53,7 +55,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: outputs-${{ env.DATE }}
+          name: outputs-${{ steps.set_date.outputs.date }}
           path: outputs/
           if-no-files-found: ignore
           retention-days: 7
@@ -61,10 +63,10 @@ jobs:
       - name: Create GitHub Release and upload ZIP
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "data-${{ env.DATE }}"
-          name: "Mercadona CCAA - ${{ env.DATE }}"
+          tag_name: "data-${{ steps.set_date.outputs.date }}"
+          name: "Mercadona CCAA - ${{ steps.set_date.outputs.date }}"
           body: |
             Datos diarios por CCAA (CSV dentro del ZIP).
             Generado automáticamente por GitHub Actions.
           files: |
-            mercadona_ccaa_${{ env.DATE }}.zip
+            mercadona_ccaa_${{ steps.set_date.outputs.date }}.zip
