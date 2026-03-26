@@ -14,7 +14,7 @@ from .price_analytics import (
     build_summary,
     build_price_index_series,
 )
-from chart_builder import (
+from .chart_builder import (
     save_price_index_chart,
     save_top_changes_chart,
 )
