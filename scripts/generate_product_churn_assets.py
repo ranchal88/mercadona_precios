@@ -6,7 +6,7 @@ from typing import Tuple
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from release_data_loader import load_release_snapshots, load_csv
+from .release_data_loader import load_release_snapshots, load_csv
 
 CCAA = os.environ.get("CCAA", "madrid")
 TOP_N = int(os.environ.get("TOP_N", "12"))
@@ -49,11 +49,16 @@ def get_month_end_snapshots(snapshots) -> Tuple[object, object, pd.Timestamp, pd
     if df.empty:
         raise RuntimeError("No hay snapshots disponibles")
 
+    today = pd.Timestamp.utcnow().to_period("M")
+
+    # quitar mes actual (no cerrado)
+    df_closed = df[df["month"] < today]
+
     month_ends = (
-        df.groupby("month", as_index=False)
-          .tail(1)
-          .sort_values("date")
-          .reset_index(drop=True)
+        df_closed.groupby("month", as_index=False)
+        .tail(1)
+        .sort_values("date")
+        .reset_index(drop=True)
     )
 
     if len(month_ends) < 2:
@@ -66,10 +71,14 @@ def get_month_end_snapshots(snapshots) -> Tuple[object, object, pd.Timestamp, pd
 
 
 def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
-    cols = ["product_id", "product_name", "price"]
+    cols = ["product_id", "product_name", "price", "slug"]
     out = df[cols].copy()
     out = out.dropna(subset=["product_id", "product_name"])
     out = out.drop_duplicates(subset=["product_id"])
+    out["product_url"] = out.apply(
+        lambda r: build_product_url(r["product_id"], r["slug"]),
+        axis=1
+    )
     return out
 
 
@@ -99,7 +108,7 @@ def build_new_and_removed(df_prev: pd.DataFrame, df_last: pd.DataFrame):
 
 
 def build_new_products_tweet(new_products: pd.DataFrame, ccaa: str, month_dt: pd.Timestamp, top_n: int) -> str:
-    title = f"🆕 Nuevos productos en Mercadona · {ccaa.capitalize()} · {month_label_es(month_dt)}"
+    title = f"🆕 Nuevos productos en Mercadona en {month_label_es(month_dt)} · {ccaa.capitalize()}"
     total = len(new_products)
 
     lines = [title, ""]
@@ -108,18 +117,19 @@ def build_new_products_tweet(new_products: pd.DataFrame, ccaa: str, month_dt: pd
         lines.append("No aparecen productos nuevos este mes.")
         return "\n".join(lines)
 
-    for _, row in new_products.head(top_n).iterrows():
+    for _, row in new_products.iterrows():
         lines.append(f"• {row['product_name']}")
+        if row.get("product_url"):
+            lines.append(f"  {row['product_url']}")
+        lines.append("")
 
-    extra = total - min(total, top_n)
-    if extra > 0:
-        lines += ["", f"+{extra} productos más"]
+    lines.append(f"Total nuevos productos: {total}")
 
     return "\n".join(lines)
 
 
 def build_removed_products_tweet(removed_products: pd.DataFrame, ccaa: str, month_dt: pd.Timestamp, top_n: int) -> str:
-    title = f"🚫 Productos que ya no aparecen en Mercadona · {ccaa.capitalize()} · {month_label_es(month_dt)}"
+    title = f"🚫 Productos que ya no aparecen en Mercadona · {ccaa.capitalize()}"
     total = len(removed_products)
 
     lines = [title, ""]
@@ -128,7 +138,7 @@ def build_removed_products_tweet(removed_products: pd.DataFrame, ccaa: str, mont
         lines.append("No detectamos productos desaparecidos este mes.")
         return "\n".join(lines)
 
-    for _, row in removed_products.head(top_n).iterrows():
+    for _, row in removed_products.iterrows():
         lines.append(f"• {row['product_name']}")
 
     extra = total - min(total, top_n)
@@ -136,6 +146,21 @@ def build_removed_products_tweet(removed_products: pd.DataFrame, ccaa: str, mont
         lines += ["", f"+{extra} productos más"]
 
     return "\n".join(lines)
+
+def build_product_url(product_id, slug) -> str | None:
+    if pd.isna(product_id) or pd.isna(slug):
+        return None
+
+    try:
+        product_id = int(product_id)
+    except Exception:
+        return None
+
+    slug = str(slug).strip()
+    if not slug:
+        return None
+
+    return f"https://tienda.mercadona.es/product/{product_id}/{slug}"
 
 
 def save_list_card(df: pd.DataFrame, title: str, out_name: str, top_n: int) -> str:

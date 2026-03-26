@@ -1,12 +1,11 @@
 # scripts/generate_product_watch_assets.py
 import os
 import tempfile
-from pathlib import Path
 
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from release_data_loader import load_release_snapshots, load_csv
+from .release_data_loader import load_release_snapshots, load_csv
 
 CCAA = os.environ.get("CCAA", "madrid")
 PRODUCT_QUERY = os.environ.get("PRODUCT_QUERY", "Aceite de oliva virgen extra Hacendado")
@@ -46,8 +45,7 @@ def find_product_rows(df: pd.DataFrame, query: str) -> pd.DataFrame:
     return out
 
 
-def pick_single_product_id(snapshots, query: str):
-    # usar el último snapshot para decidir el product_id correcto
+def pick_single_product(snapshots, query: str):
     latest = snapshots[-1]
     df_latest = load_csv(latest.csv_path)
     matches = find_product_rows(df_latest, query)
@@ -55,17 +53,40 @@ def pick_single_product_id(snapshots, query: str):
     if matches.empty:
         raise RuntimeError(f"No se ha encontrado ningún producto para query: {query}")
 
-    # prioriza coincidencia exacta por nombre
     exact = matches[matches["product_name"].str.lower() == query.lower()]
     chosen = exact.iloc[0] if not exact.empty else matches.iloc[0]
 
-    return int(chosen["product_id"]), str(chosen["product_name"])
+    return int(chosen["product_id"]), str(chosen["product_name"]), str(chosen["slug"])
 
 
-def build_monthly_series(snapshots, product_id: int) -> pd.DataFrame:
+def get_last_closed_month_end(snapshots) -> pd.Timestamp:
+    dates = sorted(pd.to_datetime(s.date_str) for s in snapshots)
+    if not dates:
+        raise RuntimeError("No hay snapshots disponibles")
+
+    latest_snapshot = dates[-1]
+    current_month = latest_snapshot.to_period("M")
+
+    closed_dates = [d for d in dates if d.to_period("M") < current_month]
+    if not closed_dates:
+        raise RuntimeError("No hay ningún mes cerrado disponible todavía")
+
+    return closed_dates[-1]
+
+
+def build_monthly_series(snapshots, product_id: int, baseline_date: str) -> pd.DataFrame:
+    baseline_dt = pd.to_datetime(baseline_date)
+    last_closed_dt = get_last_closed_month_end(snapshots)
+
     rows = []
 
     for snap in snapshots:
+        snap_dt = pd.to_datetime(snap.date_str)
+
+        # Solo desde baseline hasta el último día disponible del mes anterior
+        if snap_dt < baseline_dt or snap_dt > last_closed_dt:
+            continue
+
         df = load_csv(snap.csv_path)
         hit = df[df["product_id"] == product_id].copy()
         if hit.empty:
@@ -75,22 +96,20 @@ def build_monthly_series(snapshots, product_id: int) -> pd.DataFrame:
         if pd.isna(price):
             continue
 
-        date = pd.to_datetime(snap.date_str)
         rows.append({
-            "snapshot_date": date,
-            "month": date.to_period("M"),
+            "snapshot_date": snap_dt,
+            "month": snap_dt.to_period("M"),
             "price": float(price),
         })
 
     if not rows:
-        raise RuntimeError("No hay histórico para ese product_id")
+        raise RuntimeError("No hay histórico suficiente para ese product_id en el rango solicitado")
 
     out = pd.DataFrame(rows).sort_values("snapshot_date")
 
-    # último snapshot de cada mes
+    # Último snapshot disponible de cada mes del rango válido
     monthly = (
-        out.sort_values("snapshot_date")
-           .groupby("month", as_index=False)
+        out.groupby("month", as_index=False)
            .tail(1)
            .sort_values("snapshot_date")
            .reset_index(drop=True)
@@ -137,7 +156,23 @@ def save_text(text: str, out_name: str) -> str:
     return out_path
 
 
-def build_tweet(product_name: str, monthly: pd.DataFrame, baseline_price: float) -> str:
+def build_product_url(product_id, slug) -> str | None:
+    if pd.isna(product_id) or pd.isna(slug):
+        return None
+
+    try:
+        product_id = int(product_id)
+    except Exception:
+        return None
+
+    slug = str(slug).strip()
+    if not slug:
+        return None
+
+    return f"https://tienda.mercadona.es/product/{product_id}/{slug}"
+
+
+def build_tweet(product_name: str, monthly: pd.DataFrame, baseline_price: float, product_url: str | None) -> str:
     latest_row = monthly.iloc[-1]
     latest_date = latest_row["snapshot_date"].strftime("%d/%m/%Y")
     latest_price = float(latest_row["price"])
@@ -149,13 +184,16 @@ def build_tweet(product_name: str, monthly: pd.DataFrame, baseline_price: float)
         "",
     ]
 
-    for _, row in monthly.tail(3).iterrows():
+    for _, row in monthly.iterrows():
         lines.append(f"{row['snapshot_date'].strftime('%d/%m/%Y')}: {fmt_eur(row['price'])}")
 
     lines += [
         "",
         fmt_pct(pct)
     ]
+
+    if product_url:
+        lines += ["", product_url]
 
     return "\n".join(lines)
 
@@ -168,19 +206,23 @@ def main():
         if not snapshots:
             raise RuntimeError(f"No hay snapshots para {CCAA}")
 
-        product_id, product_name = pick_single_product_id(snapshots, PRODUCT_QUERY)
-        monthly = build_monthly_series(snapshots, product_id)
+        product_id, product_name, slug = pick_single_product(snapshots, PRODUCT_QUERY)
+        product_url = build_product_url(product_id, slug)
+
+        monthly = build_monthly_series(snapshots, product_id, BASELINE_DATE)
         baseline_price = get_baseline_price(snapshots, product_id, BASELINE_DATE)
 
-        slug = slugify(product_name)
+        slug_name = slugify(product_name)
 
-        txt = build_tweet(product_name, monthly, baseline_price)
-        txt_path = save_text(txt, f"tweet_product_{slug}.txt")
-        png_path = save_chart(monthly, product_name, f"tweet_product_{slug}.png")
+        txt = build_tweet(product_name, monthly, baseline_price, product_url)
+        txt_path = save_text(txt, f"tweet_product_{slug_name}.txt")
+        png_path = save_chart(monthly, product_name, f"tweet_product_{slug_name}.png")
 
         print("✅ Product watch assets generados:")
         print(txt_path)
         print(png_path)
+        print(f"Baseline usado: {BASELINE_DATE}")
+        print(f"Último mes cerrado incluido: {monthly.iloc[-1]['snapshot_date'].strftime('%Y-%m-%d')}")
 
 
 if __name__ == "__main__":

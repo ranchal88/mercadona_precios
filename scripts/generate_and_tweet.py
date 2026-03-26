@@ -3,9 +3,9 @@ import os
 import tempfile
 import pandas as pd
 
-from generate_content_assets import main as generate_assets
-from x_publisher import post_tweet
-from release_data_loader import load_release_snapshots, get_latest_snapshot
+from .generate_content_assets import main as generate_assets
+from .x_publisher import post_tweet
+from .release_data_loader import load_release_snapshots, get_latest_snapshot
 
 OUTPUT_DIR = "outputs"
 CONTENT_TYPE = os.environ.get("CONTENT_TYPE", "avg")  # avg | up | down

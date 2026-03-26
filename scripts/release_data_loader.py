@@ -10,8 +10,8 @@ import pandas as pd
 import requests
 
 
-REPO = os.environ["GITHUB_REPOSITORY"]
-GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
+REPO = os.environ.get("GITHUB_REPOSITORY", "ranchal88/mercadona_precios")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
 
 @dataclass
@@ -22,10 +22,14 @@ class ReleaseSnapshot:
 
 
 def github_headers():
-    return {
-        "Authorization": f"token {GITHUB_TOKEN}",
+    headers = {
         "Accept": "application/vnd.github+json"
     }
+
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"token {GITHUB_TOKEN}"
+
+    return headers
 
 
 def get_releases() -> List[dict]:

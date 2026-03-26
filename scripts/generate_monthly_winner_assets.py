@@ -3,9 +3,9 @@ import os
 import tempfile
 import pandas as pd
 
-from release_data_loader import load_release_snapshots, load_csv
-from price_analytics import build_variation_df, get_top_risers, get_top_fallers
-from chart_builder import save_top_changes_chart
+from .release_data_loader import load_release_snapshots, load_csv
+from .price_analytics import build_variation_df, get_top_risers, get_top_fallers
+from .chart_builder import save_top_changes_chart
 
 CCAA = os.environ.get("CCAA", "madrid")
 TOP_N = int(os.environ.get("TOP_N", "5"))
@@ -22,6 +22,9 @@ def fmt_pct(x: float) -> str:
 
 def fmt_eur(x: float) -> str:
     return f"{x:.2f}€"
+
+def maybe_add_url(url: str | None) -> str:
+    return f"\n\n{url}" if url else ""
 
 
 def write_text_file(filename: str, text: str) -> str:
@@ -51,11 +54,16 @@ def get_month_end_snapshots(snapshots):
     if df.empty:
         raise RuntimeError("No hay snapshots disponibles")
 
+    today = pd.Timestamp.utcnow().to_period("M")
+
+    # quitar mes actual (no cerrado)
+    df_closed = df[df["month"] < today]
+
     month_ends = (
-        df.groupby("month", as_index=False)
-          .tail(1)
-          .sort_values("date")
-          .reset_index(drop=True)
+        df_closed.groupby("month", as_index=False)
+        .tail(1)
+        .sort_values("date")
+        .reset_index(drop=True)
     )
 
     if len(month_ends) < 2:
@@ -72,11 +80,14 @@ def build_top_up_tweet(top_up: pd.DataFrame, ccaa: str, last_dt: pd.Timestamp) -
         return f"📈 No hay datos suficientes para calcular la mayor subida mensual en {ccaa.capitalize()}."
 
     r = top_up.iloc[0]
+    url = r.get("product_url")
+
     return (
-        f"📈 El producto que más subió en Mercadona · {ccaa.capitalize()} · {month_label_es(last_dt)}\n\n"
+        f"📈 El producto que más subió en Mercadona en {month_label_es(last_dt)}· {ccaa.capitalize()}\n\n"
         f"{r['product_name']}\n\n"
         f"{fmt_pct(r['pct_change'])}\n\n"
         f"{fmt_eur(r['price_prev'])} → {fmt_eur(r['price_today'])}"
+        f"{maybe_add_url(url)}"
     )
 
 
@@ -85,11 +96,14 @@ def build_top_down_tweet(top_down: pd.DataFrame, ccaa: str, last_dt: pd.Timestam
         return f"📉 No hay datos suficientes para calcular la mayor bajada mensual en {ccaa.capitalize()}."
 
     r = top_down.iloc[0]
+    url = r.get("product_url")
+
     return (
-        f"📉 El producto que más bajó en Mercadona · {ccaa.capitalize()} · {month_label_es(last_dt)}\n\n"
+        f"📉 El producto que más bajó en Mercadona en {month_label_es(last_dt)} · {ccaa.capitalize()}\n\n"
         f"{r['product_name']}\n\n"
         f"{fmt_pct(r['pct_change'])}\n\n"
         f"{fmt_eur(r['price_prev'])} → {fmt_eur(r['price_today'])}"
+        f"{maybe_add_url(url)}"
     )
 
 
@@ -119,13 +133,13 @@ def main():
 
         up_png_path = save_top_changes_chart(
             top_up.head(TOP_N),
-            title=f"Productos que más suben · {month_label_es(last_dt)} · {CCAA.capitalize()}",
+            title=f"Productos que más suben en {month_label_es(last_dt)} · {CCAA.capitalize()}",
             out_name="tweet_monthly_top_up.png"
         )
 
         down_png_path = save_top_changes_chart(
             top_down.head(TOP_N),
-            title=f"Productos que más bajan · {month_label_es(last_dt)} · {CCAA.capitalize()}",
+            title=f"Productos que más bajan en {month_label_es(last_dt)} · {CCAA.capitalize()}",
             out_name="tweet_monthly_top_down.png"
         )
 

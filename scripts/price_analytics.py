@@ -20,27 +20,58 @@ class AnalyticsSummary:
 
 
 def normalize_snapshot_df(df: pd.DataFrame) -> pd.DataFrame:
-    cols = ["product_id", "product_name", "price"]
+    cols = ["product_id", "product_name", "price", "slug"]
     out = df[cols].copy()
     out = out.dropna(subset=["product_id", "price"])
     out = out.drop_duplicates(subset=["product_id"])
     return out
 
+def build_product_url(product_id, slug) -> str | None:
+    if pd.isna(product_id) or pd.isna(slug):
+        return None
+
+    try:
+        product_id = int(product_id)
+    except Exception:
+        return None
+
+    slug = str(slug).strip()
+    if not slug:
+        return None
+
+    return f"https://tienda.mercadona.es/product/{product_id}/{slug}"
 
 def build_variation_df(df_now: pd.DataFrame, df_ref: pd.DataFrame, ref_label: str) -> pd.DataFrame:
-    now = normalize_snapshot_df(df_now).rename(columns={"price": "price_today"})
+    now = normalize_snapshot_df(df_now).rename(
+        columns={
+            "price": "price_today",
+            "slug": "slug",
+        }
+    )
+
     ref = normalize_snapshot_df(df_ref).rename(
         columns={
             "price": f"price_{ref_label}",
             "product_name": f"product_name_{ref_label}",
+            "slug": f"slug_{ref_label}",
         }
     )
 
-    df = now.merge(ref[["product_id", f"price_{ref_label}"]], on="product_id", how="inner")
+    df = now.merge(
+        ref[["product_id", f"price_{ref_label}"]],
+        on="product_id",
+        how="inner"
+    )
+
     df = df[df[f"price_{ref_label}"] > 0].copy()
 
     df["pct_change"] = (
         (df["price_today"] - df[f"price_{ref_label}"]) / df[f"price_{ref_label}"] * 100
+    )
+
+    df["product_url"] = df.apply(
+        lambda r: build_product_url(r["product_id"], r["slug"]),
+        axis=1
     )
 
     return df
@@ -129,3 +160,5 @@ def build_price_index_series(snapshots_with_df: list[tuple[str, pd.DataFrame]]) 
         })
 
     return pd.DataFrame(rows).sort_values("date")
+
+    
