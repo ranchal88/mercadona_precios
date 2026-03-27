@@ -35,7 +35,7 @@ jobs:
           TOP_N: 5
           DAYS_WEEK: 7
         run: |
-          python scripts/generate_assets_only.py
+          python -m scripts.generate_assets_only
 
       - name: Upload outputs as workflow artifact
         uses: actions/upload-artifact@v4
