@@ -51,9 +51,8 @@ def write_text_file(filename: str, text: str) -> str:
 
 def build_avg_tweet(summary, ccaa: str) -> str:
     return (
-        f"📊 Precio medio Mercadona {ccaa.capitalize()} · {summary.latest_date}\n\n"
-        f"Desde enero de 2026:\n"
-        f"{fmt_pct(summary.avg_change)}"
+        f"📊 Variación precio medio Mercadona desde enero de 2026 · {ccaa.capitalize()} · {summary.latest_date}\n\n"
+        f"📈 {fmt_pct(summary.avg_change)}"
     )
 
 
@@ -65,7 +64,7 @@ def build_top_up_tweet(summary, ccaa: str) -> str:
     url = r.get("product_url")
 
     return (
-        f"📈 Producto que más sube en Mercadona · {ccaa.capitalize()} · {summary.latest_date}\n\n"
+        f"📈 Producto que más sube en Mercadona desde enero de 2026· {ccaa.capitalize()} · {summary.latest_date}\n\n"
         f"{r['product_name']}\n\n"
         f"{fmt_pct(r['pct_change'])}\n\n"
         f"{fmt_eur(r['price_base'])} → {fmt_eur(r['price_today'])}"
@@ -80,7 +79,7 @@ def build_top_down_tweet(summary, ccaa: str) -> str:
     url = r.get("product_url")
 
     return (
-        f"📉 Producto que más baja en Mercadona · {ccaa.capitalize()} · {summary.latest_date}\n\n"
+        f"📉 Producto que más baja en Mercadona desde enero de 2026 · {ccaa.capitalize()} · {summary.latest_date}\n\n"
         f"{r['product_name']}\n\n"
         f"{fmt_pct(r['pct_change'])}\n\n"
         f"{fmt_eur(r['price_base'])} → {fmt_eur(r['price_today'])}"

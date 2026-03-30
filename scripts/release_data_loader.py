@@ -76,12 +76,15 @@ def download_csv_from_release(release: dict, tmpdir: str, ccaa: str) -> Optional
         if not asset["name"].endswith(".zip"):
             continue
 
-        r = requests.get(asset["browser_download_url"], timeout=120)
-        r.raise_for_status()
+        # Stream to avoid loading the full zip into memory and triggering MemoryError.
+        with requests.get(asset["browser_download_url"], headers=github_headers(), stream=True, timeout=120) as r:
+            r.raise_for_status()
 
-        zippath = os.path.join(tmpdir, asset["name"])
-        with open(zippath, "wb") as f:
-            f.write(r.content)
+            zippath = os.path.join(tmpdir, asset["name"])
+            with open(zippath, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
 
         with zipfile.ZipFile(zippath) as z:
             names = z.namelist()

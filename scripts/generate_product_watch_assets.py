@@ -10,7 +10,7 @@ from .release_data_loader import load_release_snapshots, load_csv
 CCAA = os.environ.get("CCAA", "madrid")
 PRODUCT_QUERY = os.environ.get("PRODUCT_QUERY", "Aceite de oliva virgen extra Hacendado")
 OUTPUT_DIR = "outputs"
-BASELINE_DATE = os.environ.get("BASELINE_DATE", "2026-01-04")
+BASELINE_DATE = os.environ.get("BASELINE_DATE", "2026-01-31")
 
 
 def ensure_output_dir():
