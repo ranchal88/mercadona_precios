@@ -17,7 +17,7 @@ def save_price_index_chart(df_index: pd.DataFrame, ccaa: str, out_name: str) -> 
 
     plt.figure(figsize=(10, 6))
     plt.plot(df_index["date"], df_index["avg_pct_change"], marker="o")
-    plt.title(f"Precio medio Mercadona · {ccaa.capitalize()}")
+    plt.title(f"Variación Precio Medio Mercadona desde enero de 2026· {ccaa.capitalize()}")
     plt.ylabel("% vs inicio del año")
     plt.xlabel("")
     plt.grid(True, alpha=0.25)
