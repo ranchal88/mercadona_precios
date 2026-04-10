@@ -65,7 +65,7 @@ def build_top_up_tweet(summary, ccaa: str) -> str:
     url = r.get("product_url")
 
     return (
-        f"📈 ¡VAYA AUMENTO! El producto que más ha subido en Mercadona desde enero de 2026 es {r['product_name']}\n\n"
+        f"📈 ¡VAYA AUMENTO! El precio del producto que más ha subido en Mercadona desde enero de 2026 es {r['product_name']}\n\n"
         f"{r['product_name']} ha pasado de {fmt_eur(r['price_base'])} a {fmt_eur(r['price_today'])}. \n\n"
         f"Se trata de un aumento del {fmt_pct(r['pct_change'])}"
         f"{maybe_add_url(url)}\n\n"
@@ -80,7 +80,7 @@ def build_top_down_tweet(summary, ccaa: str) -> str:
     url = r.get("product_url")
 
     return (
-        f"📉 ¡VAYA BAJADA! El producto que más ha disminuido en Mercadona desde enero de 2026 es {r['product_name']}\n\n"
+        f"📉 ¡VAYA BAJADA! El precio del producto que más ha caído en Mercadona desde enero de 2026 es {r['product_name']}\n\n"
         f"{r['product_name']} ha pasado de {fmt_eur(r['price_base'])} a {fmt_eur(r['price_today'])}. \n\n"
         f"Se trata de una bajada del {fmt_pct(r['pct_change'])}"
         f"{maybe_add_url(url)}\n\n"
