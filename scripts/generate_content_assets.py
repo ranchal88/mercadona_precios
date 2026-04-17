@@ -144,13 +144,13 @@ def main():
 
         up_png = save_top_changes_chart(
             summary.top_up.head(TOP_N),
-            title=f"Productos que más suben · {CCAA.capitalize()}",
+            title=f"Productos que más suben desde enero de 2026 · {CCAA.capitalize()}",
             out_name="tweet_top_up.png"
         )
 
         down_png = save_top_changes_chart(
             summary.top_down.head(TOP_N),
-            title=f"Productos que más bajan · {CCAA.capitalize()}",
+            title=f"Productos que más bajan desde enero de 2026 · {CCAA.capitalize()}",
             out_name="tweet_top_down.png"
         )
 
