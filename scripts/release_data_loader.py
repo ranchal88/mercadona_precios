@@ -8,6 +8,8 @@ from typing import List, Optional, Tuple
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 REPO = os.environ.get("GITHUB_REPOSITORY", "ranchal88/mercadona_precios")
@@ -32,13 +34,30 @@ def github_headers():
     return headers
 
 
+def _make_session() -> requests.Session:
+    session = requests.Session()
+    retry = Retry(
+        total=5,
+        connect=3,
+        read=3,
+        backoff_factor=2,
+        status_forcelist=[500, 502, 503, 504],
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
 def get_releases() -> List[dict]:
     url = f"https://api.github.com/repos/{REPO}/releases"
     releases = []
     page = 1
+    session = _make_session()
 
     while True:
-        r = requests.get(
+        r = session.get(
             url,
             headers=github_headers(),
             params={"per_page": 100, "page": page},
@@ -72,12 +91,13 @@ def extract_date_from_release(release: dict) -> Optional[str]:
 
 
 def download_csv_from_release(release: dict, tmpdir: str, ccaa: str) -> Optional[str]:
+    session = _make_session()
     for asset in release.get("assets", []):
         if not asset["name"].endswith(".zip"):
             continue
 
         # Stream to avoid loading the full zip into memory and triggering MemoryError.
-        with requests.get(asset["browser_download_url"], headers=github_headers(), stream=True, timeout=120) as r:
+        with session.get(asset["browser_download_url"], headers=github_headers(), stream=True, timeout=(30, 180)) as r:
             r.raise_for_status()
 
             zippath = os.path.join(tmpdir, asset["name"])
